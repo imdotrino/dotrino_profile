@@ -20,6 +20,12 @@
       .state { text-align: center; color: #4a5560; max-width: 28rem; padding: 2rem; }
       .state h1 { font-size: 1.2rem; color: #181c1e; margin: 0 0 .5rem; }
       .state a { color: #00658c; }
+      /* Vista de validación (#v=): banner de firma + contenido + perfil/reputación. */
+      .validate-wrap { max-width: 30rem; width: 100%; display: flex; flex-direction: column; gap: 1rem; padding: 1.2rem; }
+      .banner { border-radius: 16px; padding: 1rem 1.2rem; font-weight: 600; font-size: 1.05rem; }
+      .banner.ok { background: #e6f4ea; color: #1a7a3a; border: 1px solid #b6e0c2; }
+      .banner.bad { background: #fdecea; color: #b3261e; border: 1px solid #f3c0bb; }
+      .content { background: #fff; border: 1px solid #e3e9ed; border-radius: 16px; padding: 1rem 1.2rem; white-space: pre-wrap; color: #181c1e; box-shadow: 0 10px 30px rgba(74,85,96,.05); }
       /* Tema claro Cool & Cozy para el <dotrino-profile> (mismas vars --ccp-* del home). */
       dotrino-profile {
         --ccp-bg: #ffffff; --ccp-bg-2: #f4f7f9; --ccp-bg-3: #eaeff3; --ccp-bg-4: #e3e9ed;
