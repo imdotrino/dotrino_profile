@@ -1,0 +1,3 @@
+# App interna (perfiles = contenido de usuario): no indexar.
+User-agent: *
+Disallow: /

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- App interna: NO indexar (perfiles = contenido de usuario). -->
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="/images/imagoWBG.png" />
+    <title>Perfil — Dotrino</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; min-height: 100vh;
+        font-family: 'Quicksand', system-ui, -apple-system, Segoe UI, sans-serif;
+        background: #f4f7f9; color: #181c1e;
+        display: flex; align-items: center; justify-content: center;
+      }
+      #app { width: 100%; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+      .state { text-align: center; color: #4a5560; max-width: 28rem; padding: 2rem; }
+      .state h1 { font-size: 1.2rem; color: #181c1e; margin: 0 0 .5rem; }
+      .state a { color: #00658c; }
+      /* Tema claro Cool & Cozy para el <dotrino-profile> (mismas vars --ccp-* del home). */
+      dotrino-profile {
+        --ccp-bg: #ffffff; --ccp-bg-2: #f4f7f9; --ccp-bg-3: #eaeff3; --ccp-bg-4: #e3e9ed;
+        --ccp-border: #cfd8de; --ccp-text: #181c1e; --ccp-muted: #4a5560;
+        --ccp-accent: #00658c; --ccp-accent-2: #00506f; --ccp-accent-text: #ffffff;
+        --ccp-gold: #c98a00; --ccp-derived: #b07f00; --ccp-online: #00897b;
+        --ccp-affinity: #2f8fd6; --ccp-input-bg: #f1f4f6; --ccp-radius: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div class="state"><p>Cargando perfil…</p></div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
