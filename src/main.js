@@ -101,7 +101,29 @@ function injectVaultStyles () {
     .vault-wrap .btn.ghost { background: #eef2ff; color: #1a73e8; }
     .vault-wrap .scanrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .vault-wrap .scanbox video { width: 100%; max-width: 360px; border-radius: 10px; background: #000; display: block; margin: 8px 0; }
-    .vault-wrap details > summary { cursor: pointer; margin-top: 10px; color: #777; }`
+    .vault-wrap details > summary { cursor: pointer; margin-top: 10px; color: #777; }
+    /* Topbar estándar del ecosistema (CONVENCIONES §5/§6): marca · acciones · moneda. */
+    #app:has(.vault-page) { padding: 0; align-items: stretch; }
+    .vault-page { width: 100%; min-height: 100vh; display: flex; flex-direction: column; }
+    .vault-page .topbar { display: flex; align-items: center; gap: 12px; padding: 10px max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left)); padding-top: max(10px, env(safe-area-inset-top)); background: #fff; border-bottom: 1px solid #e3e9ed; position: sticky; top: 0; z-index: 50; }
+    .vault-page .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .vault-page .brand-logo { width: 36px; height: 36px; border-radius: 9px; }
+    .vault-page .brand-text { display: flex; flex-direction: column; line-height: 1.1; min-width: 0; }
+    .vault-page .brand-name { font-weight: 700; font-size: 1.15rem; color: #181c1e; }
+    .vault-page .brand-tag { font-size: .72rem; color: #4a5560; }
+    .vault-page .actions { display: flex; gap: 6px; margin-left: auto; align-items: center; }
+    .vault-page .profile-btn { background: transparent; border: 1px solid #cfd8de; width: 38px; height: 38px; padding: 0; border-radius: 10px; color: #00658c; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+    .vault-page .profile-btn svg { width: 19px; height: 19px; }
+    .vault-page .topbar-coin { flex: 0 0 auto; }
+    .vault-page .vault-main { flex: 1; display: flex; align-items: flex-start; justify-content: center; padding: 1.2rem 1rem; }
+    .vault-page .vault-card { max-width: 560px; width: 100%; text-align: left; }
+    .vault-page .vault-card h1 { font-size: 1.3rem; color: #181c1e; margin: 0 0 1rem; }
+    @media (max-width: 560px) {
+      .vault-page .topbar { flex-wrap: wrap; row-gap: 8px; }
+      .vault-page .brand { order: 1; flex: 1 1 auto; }
+      .vault-page .topbar-coin { order: 2; }
+      .vault-page .actions { order: 3; flex-basis: 100%; justify-content: flex-end; margin-left: 0; }
+    }`
   document.head.appendChild(s)
 }
 
@@ -161,6 +183,34 @@ function scanWithCamera (host) {
   })
 }
 
+// Topbar estándar (CONVENCIONES §5/§6.1): marca a la izquierda; perfil + moneda a la derecha.
+async function openMyProfile () {
+  try {
+    const { id, provider } = await connectProvider()
+    const pubkey = id && id.me && id.me.publickey
+    if (!pubkey) return
+    const el = makeProfile({ pubkey, name: id.me.nickname, mode: 'self', modal: true })
+    el.provider = provider
+    document.body.appendChild(el)
+  } catch (_) { /* perfil opcional */ }
+}
+
+function vaultShell (title, inner) {
+  mount.innerHTML = `<div class="vault-page">
+    <header class="topbar">
+      <div class="brand"><img class="brand-logo" src="/images/imagoWBG.png" alt="" /><div class="brand-text"><span class="brand-name">Dotrino</span><span class="brand-tag">Tu bóveda</span></div></div>
+      <div class="actions">
+        <button class="profile-btn" id="cc-myprofile" title="Mi perfil" aria-label="Mi perfil">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" /></svg>
+        </button>
+      </div>
+      <dotrino-support class="topbar-coin" href="https://ko-fi.com/dotrino" repo="imdotrino/dotrino_profile" discord="https://discord.gg/D648uq7cth"></dotrino-support>
+    </header>
+    <main class="vault-main"><div class="vault-card">${title ? `<h1>${esc(title)}</h1>` : ''}${inner}</div></main>
+  </div>`
+  const pb = document.getElementById('cc-myprofile'); if (pb) pb.onclick = openMyProfile
+}
+
 async function vaultMode (prefillQr) {
   injectVaultStyles()
   let id
@@ -171,7 +221,7 @@ async function vaultMode (prefillQr) {
 
   if (status.paired) {
     const fp = await vaultFingerprint(status.master)
-    showState('Tu bóveda', `<div class="vault-wrap">
+    vaultShell('Tu bóveda', `<div class="vault-wrap">
       <div class="banner ok">✓ Este dispositivo está conectado a tu bóveda.</div>
       <ul class="vault-info">
         <li>Dispositivo: <code>${esc(status.deviceId)}</code></li>
@@ -194,7 +244,7 @@ async function vaultMode (prefillQr) {
     return
   }
 
-  showState('Conectar a tu bóveda', `<div class="vault-wrap">
+  vaultShell('Conectar a tu bóveda', `<div class="vault-wrap">
     <p>Conecta este navegador a tu <strong>bóveda</strong> (el programa <code>dotrino-vault</code> en tu PC),
        para que tu información viva en tu propio servidor. En tu PC ejecuta <code>dotrino-vault pair</code> y
        <strong>escaneá el QR</strong>, abrí su imagen/archivo, o pegá el código:</p>
