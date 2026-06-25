@@ -239,10 +239,11 @@ async function vaultMode (prefillQr) {
     const off = id.onVault((e) => {
       if (e.phase === 'challenge') {
         msg().innerHTML = `<div class="sas-box">
-          <p>Verifica que este código sea <strong>idéntico</strong> al que muestra tu PC, y apruébalo ahí:</p>
-          <div class="sas">${esc(e.sas)}</div>
-          <p class="muted">En tu PC: <code>dotrino-vault approve ${esc(e.deviceId)}</code></p>
-          <p class="muted">Esperando tu aprobación en el PC…</p></div>`
+          <p>Tu <strong>código de emparejamiento</strong>:</p>
+          <div class="sas">${esc(e.code)}</div>
+          <p class="muted">Ingresalo en tu PC para conectar este dispositivo (el vault no lo conoce hasta que vos se lo das):</p>
+          <p><code>dotrino-vault approve ${esc(e.code)}</code></p>
+          <p class="muted">Esperando que lo apruebes en el PC…</p></div>`
       }
     })
     try {
