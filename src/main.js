@@ -124,12 +124,24 @@ async function vaultMode () {
         <li>Bóveda (huella): <code>${esc(fp)}</code></li>
         <li>Permisos: <code>${esc((status.scope || []).join(', '))}</code></li>
       </ul>
-      <button id="unpair" class="btn danger">Desconectar este dispositivo</button>
+      <h2 style="font-size:16px;margin:18px 0 6px">Tus dispositivos</h2>
+      <div id="devlist" class="muted">Cargando…</div>
+      <button id="unpair" class="btn danger" style="margin-top:18px">Desconectar este dispositivo</button>
     </div>`)
     document.getElementById('unpair').onclick = async () => {
       if (!confirm('¿Desconectar este dispositivo de tu bóveda? Tendrás que volver a emparejarlo.')) return
       await id.unpairDevice(); vaultMode()
     }
+    // Lista (solo lectura) de dispositivos enrolados; revocar es desde el PC.
+    id.listVaultDevices().then(({ devices }) => {
+      const box = document.getElementById('devlist'); if (!box) return
+      if (!devices?.length) { box.textContent = '—'; return }
+      box.innerHTML = '<ul class="vault-info">' + devices.map((d) => {
+        const me = d.deviceId === status.deviceId ? ' <strong>(este)</strong>' : ''
+        const exp = d.exp ? ' · expira ' + new Date(d.exp).toLocaleDateString() : ''
+        return `<li>· <code>${esc(d.deviceId || '????')}</code>${me} ${esc(d.label || '')}<span class="muted">${esc(exp)}</span></li>`
+      }).join('') + '</ul><p class="muted">Para revocar un dispositivo, usa <code>dotrino-vault revoke</code> en tu PC.</p>'
+    }).catch(() => { const box = document.getElementById('devlist'); if (box) box.textContent = 'No se pudo cargar (¿el vault está encendido?).' })
     return
   }
 
