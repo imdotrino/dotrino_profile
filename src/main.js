@@ -46,6 +46,7 @@ async function verifySig(pubkeyStr, data, sigB64) {
 function parseHash() {
   const h = location.hash.replace(/^#/, '').trim()
   if (!h) return { mode: 'self' }
+  if (h === 'vault') return { mode: 'vault' }
   if (h.startsWith('v=')) {
     try { return { mode: 'validate', payload: JSON.parse(b64urlDecode(h.slice(2))) } } catch { return { mode: 'invalid' } }
   }
@@ -77,8 +78,101 @@ function makeProfile({ pubkey, name, since, mode, modal }) {
   return el
 }
 
+/* ── Conectar este dispositivo a la bóveda del usuario (dotrino-vault) — #vault ── */
+function injectVaultStyles () {
+  if (document.getElementById('vault-css')) return
+  const s = document.createElement('style'); s.id = 'vault-css'
+  s.textContent = `
+    .vault-wrap { max-width: 560px; margin: 0 auto; text-align: left; }
+    .vault-wrap textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 13px; padding: 10px; border: 1px solid #ccc; border-radius: 8px; resize: vertical; }
+    .vault-wrap .btn { display: inline-block; margin-top: 12px; padding: 10px 18px; border: 0; border-radius: 999px; background: #1a73e8; color: #fff; font-size: 15px; cursor: pointer; }
+    .vault-wrap .btn[disabled] { opacity: .5; cursor: default; }
+    .vault-wrap .btn.danger { background: #d93025; }
+    .vault-wrap .banner { margin: 14px 0; padding: 10px 14px; border-radius: 8px; background: #eef2ff; }
+    .vault-wrap .banner.ok { background: #e6f4ea; color: #137333; }
+    .vault-wrap .banner.bad { background: #fce8e6; color: #c5221f; }
+    .vault-wrap .sas-box { margin: 16px 0; padding: 16px; border: 2px solid #1a73e8; border-radius: 12px; text-align: center; }
+    .vault-wrap .sas-box .sas { font-size: 40px; letter-spacing: 8px; font-weight: 700; font-family: ui-monospace, monospace; margin: 8px 0; }
+    .vault-wrap .muted { color: #777; font-size: 13px; }
+    .vault-wrap .vault-info { list-style: none; padding: 0; }
+    .vault-wrap .vault-info li { padding: 4px 0; }`
+  document.head.appendChild(s)
+}
+
+async function vaultFingerprint (jwkStr) {
+  try {
+    const jwk = JSON.parse(jwkStr)
+    const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalStringify({ crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y })))
+    return [...new Uint8Array(h)].slice(0, 8).map((b) => b.toString(16).padStart(2, '0')).join('')
+  } catch { return '????????' }
+}
+
+async function vaultMode () {
+  injectVaultStyles()
+  let id
+  try { id = await Identity.connect() } catch {
+    showState('Tu bóveda', '<p>No se pudo conectar tu identidad. Recarga e inténtalo de nuevo.</p>'); return
+  }
+  const status = await id.vaultStatus().catch(() => ({ paired: false }))
+
+  if (status.paired) {
+    const fp = await vaultFingerprint(status.master)
+    showState('Tu bóveda', `<div class="vault-wrap">
+      <div class="banner ok">✓ Este dispositivo está conectado a tu bóveda.</div>
+      <ul class="vault-info">
+        <li>Dispositivo: <code>${esc(status.deviceId)}</code></li>
+        <li>Bóveda (huella): <code>${esc(fp)}</code></li>
+        <li>Permisos: <code>${esc((status.scope || []).join(', '))}</code></li>
+      </ul>
+      <button id="unpair" class="btn danger">Desconectar este dispositivo</button>
+    </div>`)
+    document.getElementById('unpair').onclick = async () => {
+      if (!confirm('¿Desconectar este dispositivo de tu bóveda? Tendrás que volver a emparejarlo.')) return
+      await id.unpairDevice(); vaultMode()
+    }
+    return
+  }
+
+  showState('Conectar a tu bóveda', `<div class="vault-wrap">
+    <p>Conecta este navegador a tu <strong>bóveda</strong> (el programa <code>dotrino-vault</code> en tu PC),
+       para que tu información viva en tu propio servidor. En tu PC ejecuta <code>dotrino-vault pair</code>
+       y pega aquí el código que muestra:</p>
+    <textarea id="qr" rows="4" placeholder='{"v":2,"iss":"…","proxy":"…","token":"…","sn":"…"}'></textarea>
+    <div><button id="connect" class="btn">Conectar</button></div>
+    <div id="vmsg"></div>
+  </div>`)
+  document.getElementById('connect').onclick = async () => {
+    const msg = document.getElementById('vmsg')
+    let qr
+    try { qr = JSON.parse(document.getElementById('qr').value.trim()) }
+    catch { msg.innerHTML = '<div class="banner bad">Ese código no es válido. Copia el objeto completo que muestra <code>dotrino-vault pair</code>.</div>'; return }
+    document.getElementById('connect').disabled = true
+    msg.innerHTML = '<div class="banner">Conectando…</div>'
+    const off = id.onVault((e) => {
+      if (e.phase === 'challenge') {
+        msg.innerHTML = `<div class="sas-box">
+          <p>Verifica que este código sea <strong>idéntico</strong> al que muestra tu PC, y apruébalo ahí:</p>
+          <div class="sas">${esc(e.sas)}</div>
+          <p class="muted">En tu PC: <code>dotrino-vault approve ${esc(e.deviceId)}</code></p>
+          <p class="muted">Esperando tu aprobación en el PC…</p>
+        </div>`
+      }
+    })
+    try {
+      await id.enrollDevice(qr); off()
+      msg.innerHTML = '<div class="banner ok">✓ ¡Conectado! Este dispositivo ahora usa tu bóveda.</div>'
+      setTimeout(() => vaultMode(), 1600)
+    } catch (e) {
+      off(); document.getElementById('connect').disabled = false
+      msg.innerHTML = `<div class="banner bad">No se pudo conectar: ${esc(e.message)}</div>`
+    }
+  }
+}
+
 async function main() {
   const data = parseHash()
+
+  if (data.mode === 'vault') return vaultMode()
 
   // ── VALIDAR: firma del contenido + reputación del remitente, en un paso ──
   if (data.mode === 'validate') {

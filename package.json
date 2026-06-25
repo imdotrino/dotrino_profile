@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@dotrino/identity": "0.10.0",
+    "@dotrino/identity": "github:imdotrino/dotrino-identity",
     "@dotrino/profile": "0.3.1",
     "@dotrino/reputation": "0.5.0"
   },
