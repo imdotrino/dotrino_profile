@@ -47,6 +47,7 @@ function parseHash() {
   const h = location.hash.replace(/^#/, '').trim()
   if (!h) return { mode: 'self' }
   if (h === 'vault') return { mode: 'vault' }
+  if (h.startsWith('vault=')) { try { return { mode: 'vault', qr: JSON.parse(b64urlDecode(h.slice(6))) } } catch { return { mode: 'vault' } } }
   if (h.startsWith('v=')) {
     try { return { mode: 'validate', payload: JSON.parse(b64urlDecode(h.slice(2))) } } catch { return { mode: 'invalid' } }
   }
@@ -107,7 +108,7 @@ async function vaultFingerprint (jwkStr) {
   } catch { return '????????' }
 }
 
-async function vaultMode () {
+async function vaultMode (prefillQr) {
   injectVaultStyles()
   let id
   try { id = await Identity.connect() } catch {
@@ -179,12 +180,17 @@ async function vaultMode () {
       msg.innerHTML = `<div class="banner bad">No se pudo conectar: ${esc(e.message)}</div>`
     }
   }
+  // Si el QR del vault ya traía el payload (lo escaneaste), autocompletá y conectá solo.
+  if (prefillQr) {
+    document.getElementById('qr').value = JSON.stringify(prefillQr)
+    document.getElementById('connect').click()
+  }
 }
 
 async function main() {
   const data = parseHash()
 
-  if (data.mode === 'vault') return vaultMode()
+  if (data.mode === 'vault') return vaultMode(data.qr)
 
   // ── VALIDAR: firma del contenido + reputación del remitente, en un paso ──
   if (data.mode === 'validate') {
