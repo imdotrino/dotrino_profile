@@ -219,6 +219,7 @@ async function vaultMode (prefillQr) {
   const msg = () => document.getElementById('vmsg')
   async function doConnect (qr) {
     if (!qr || !qr.iss || !qr.token) { msg().innerHTML = '<div class="banner bad">No reconocí un código de emparejamiento válido. Volvé a generar el QR con <code>dotrino-vault pair</code>.</div>'; return }
+    if (!qr.sn || (qr.v && qr.v < 2)) { msg().innerHTML = '<div class="banner bad">Este código es de una <strong>versión vieja</strong> del vault. Actualizá a la última y reiniciá el servicio (<code>systemctl --user restart dotrino-vault</code>), confirmá con <code>dotrino-vault status</code>, y generá un código nuevo con <code>dotrino-vault pair</code>.</div>'; return }
     msg().innerHTML = '<div class="banner">Conectando…</div>'
     const off = id.onVault((e) => {
       if (e.phase === 'challenge') {
