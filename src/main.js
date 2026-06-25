@@ -194,7 +194,7 @@ async function vaultMode (prefillQr) {
         const me = d.deviceId === status.deviceId ? ' <strong>(este)</strong>' : ''
         const exp = d.exp ? ' · expira ' + new Date(d.exp).toLocaleDateString() : ''
         return `<li>· <code>${esc(d.deviceId || '????')}</code>${me} ${esc(d.label || '')}<span class="muted">${esc(exp)}</span></li>`
-      }).join('') + '</ul><p class="muted">Para revocar un dispositivo, usa <code>dotrino-vault revoke</code> en tu PC.</p>'
+      }).join('') + '</ul>'
     }).catch(() => { const box = document.getElementById('devlist'); if (box) box.textContent = 'No se pudo cargar (¿el vault está encendido?).' })
     return
   }
