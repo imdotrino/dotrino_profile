@@ -220,6 +220,21 @@ async function vaultMode (prefillQr) {
   async function doConnect (qr) {
     if (!qr || !qr.iss || !qr.token) { msg().innerHTML = '<div class="banner bad">No reconocí un código de emparejamiento válido. Volvé a generar el QR con <code>dotrino-vault pair</code>.</div>'; return }
     if (!qr.sn || (qr.v && qr.v < 2)) { msg().innerHTML = '<div class="banner bad">Este código es de una <strong>versión vieja</strong> del vault. Actualizá a la última y reiniciá el servicio (<code>systemctl --user restart dotrino-vault</code>), confirmá con <code>dotrino-vault status</code>, y generá un código nuevo con <code>dotrino-vault pair</code>.</div>'; return }
+    // ANTI-QR-FALSO: la identidad de la bóveda es la HUELLA de su maestra. Un atacante puede
+    // mostrarte el QR de SU vault; la única defensa es que confirmes la huella contra TU PC.
+    const fp = await vaultFingerprint(qr.iss)
+    msg().innerHTML = `<div class="sas-box">
+      <p>Te vas a conectar a la bóveda con esta <strong>huella</strong>:</p>
+      <div class="sas" style="font-size:22px;letter-spacing:2px;word-break:break-all">${esc(fp)}</div>
+      <p class="muted">Confirmá que sea <strong>idéntica</strong> a la que muestra <code>dotrino-vault status</code> en tu PC. Si no coincide, <strong>NO es tu bóveda</strong> (te pasaron un QR falso) → cancelá.</p>
+      <button id="fpok" class="btn">Coincide, conectar</button>
+      <button id="fpno" class="btn ghost">Cancelar</button>
+    </div>`
+    const proceed = await new Promise((resolve) => {
+      document.getElementById('fpok').onclick = () => resolve(true)
+      document.getElementById('fpno').onclick = () => resolve(false)
+    })
+    if (!proceed) { msg().innerHTML = '<div class="banner">Cancelado. No se conectó nada.</div>'; return }
     msg().innerHTML = '<div class="banner">Conectando…</div>'
     const off = id.onVault((e) => {
       if (e.phase === 'challenge') {
