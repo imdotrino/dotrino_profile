@@ -214,18 +214,20 @@ function scanWithCamera (host) {
 async function openMyProfile () {
   try {
     const { id, provider } = await connectProvider()
-    const pubkey = id && id.me && id.me.publickey
+    const cur = id.currentProfile ? await id.currentProfile().catch(() => null) : null
+    const pubkey = cur?.pubkey || (id && id.me && id.me.publickey)
     if (!pubkey) return
-    const el = makeProfile({ pubkey, name: id.me.nickname, mode: 'self', modal: true })
+    // El componente <dotrino-profile mode="self"> trae el switcher de perfiles (acción global).
+    const el = makeProfile({ pubkey, name: cur?.name || (id && id.me && id.me.nickname), mode: 'self', modal: true })
     el.provider = provider
     document.body.appendChild(el)
   } catch (_) { /* perfil opcional */ }
 }
 
-function vaultShell (title, inner) {
+function vaultShell (title, inner, tag = 'Tu identidad') {
   mount.innerHTML = `<div class="vault-page">
     <header class="topbar">
-      <div class="brand"><img class="brand-logo" src="/images/imagoWBG.png" alt="" /><div class="brand-text"><span class="brand-name">Dotrino</span><span class="brand-tag">Tu bóveda</span></div></div>
+      <div class="brand"><img class="brand-logo" src="/images/imagoWBG.png" alt="" /><div class="brand-text"><span class="brand-name">Dotrino</span><span class="brand-tag">${esc(tag)}</span></div></div>
       <div class="actions">
         <button class="profile-btn" id="cc-myprofile" title="Mi perfil" aria-label="Mi perfil">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" /></svg>
@@ -241,7 +243,7 @@ function vaultShell (title, inner) {
 // El botón del topbar muestra el AVATAR del perfil activo y abre el gestor de perfiles.
 async function decorateProfileButton () {
   const pb = document.getElementById('cc-myprofile'); if (!pb) return
-  pb.onclick = openProfilesPanel
+  pb.onclick = openMyProfile // abre <dotrino-profile mode="self"> con el switcher de perfiles
   try {
     const id = await Identity.connect()
     const cur = await id.currentProfile()
@@ -313,7 +315,11 @@ async function vaultMode (prefillQr) {
   try { id = await Identity.connect() } catch {
     showState('Tu bóveda', '<p>No se pudo conectar tu identidad. Recarga e inténtalo de nuevo.</p>'); return
   }
-  const status = await id.vaultStatus().catch(() => ({ paired: false }))
+  // Si venimos de elegir/crear un perfil para esta bóveda (se cambió de perfil y la página
+  // recargó), retomamos el emparejamiento con el perfil ya activo, sin volver a preguntar.
+  let intentQr = null
+  try { const r = sessionStorage.getItem('cc-pair-intent'); if (r) { sessionStorage.removeItem('cc-pair-intent'); intentQr = JSON.parse(r) } } catch (_) {}
+  const status = intentQr ? { paired: false } : await id.vaultStatus().catch(() => ({ paired: false }))
 
   if (status.paired) {
     const fp = await vaultFingerprint(status.master)
@@ -358,9 +364,29 @@ async function vaultMode (prefillQr) {
   </div>`)
 
   const msg = () => document.getElementById('vmsg')
-  async function doConnect (qr) {
+  async function doConnect (qr, skip) {
     if (!qr || !qr.iss || !qr.token) { msg().innerHTML = '<div class="banner bad">No reconocí un código de emparejamiento válido. Volvé a generar el QR con <code>dotrino-vault pair</code>.</div>'; return }
     if (!qr.sn || (qr.v && qr.v < 2)) { msg().innerHTML = '<div class="banner bad">Este código es de una <strong>versión vieja</strong> del vault. Actualizá a la última y reiniciá el servicio (<code>systemctl --user restart dotrino-vault</code>), confirmá con <code>dotrino-vault status</code>, y generá un código nuevo con <code>dotrino-vault pair</code>.</div>'; return }
+    // Elegir CON QUÉ PERFIL conectar esta bóveda (o uno nuevo) ANTES de emparejar.
+    if (!skip) {
+      const profiles = await id.listProfiles().catch(() => [])
+      const cur = profiles.find((p) => p.current) || profiles[0]
+      msg().innerHTML = `<div class="sas-box" style="text-align:left">
+        <p><strong>¿Con qué perfil quieres conectar esta bóveda?</strong></p>
+        <p class="muted">Cada perfil tiene su propia bóveda. Elige uno existente o conecta uno nuevo.</p>
+        <div class="pf-pick" style="display:flex;flex-direction:column;gap:8px;margin:10px 0"></div>
+        <button class="btn ghost" id="pick-new">+ Conectar un perfil nuevo</button>
+      </div>`
+      const host = msg().querySelector('.pf-pick')
+      host.innerHTML = profiles.map((p) => `<button class="btn ${p.current ? '' : 'ghost'} pick-prof" data-id="${esc(p.id)}">${esc(p.name || 'Perfil sin nombre')}${p.current ? ' · activo' : ''}</button>`).join('')
+      host.querySelectorAll('.pick-prof').forEach((b) => { b.onclick = async () => {
+        const pid = b.dataset.id
+        if (cur && pid === cur.id) { doConnect(qr, true) } // ya activo → emparejar directo
+        else { sessionStorage.setItem('cc-pair-intent', JSON.stringify(qr)); await id.switchProfile(pid); location.reload() }
+      } })
+      msg().querySelector('#pick-new').onclick = async () => { sessionStorage.setItem('cc-pair-intent', JSON.stringify(qr)); await id.createProfile(''); location.reload() }
+      return
+    }
     msg().innerHTML = '<div class="banner">Conectando…</div>'
     const off = id.onVault((e) => {
       if (e.phase === 'challenge') {
@@ -396,8 +422,9 @@ async function vaultMode (prefillQr) {
     doConnect(extractPayload(text))
   }
 
-  // Si el QR del vault ya traía el payload (lo escaneaste con la cámara del teléfono), conectá solo.
-  if (prefillQr) doConnect(prefillQr)
+  // Retomar tras elegir perfil (intent) → emparejar directo. Si el QR vino en la URL, mostrar el selector.
+  if (intentQr) doConnect(intentQr, true)
+  else if (prefillQr) doConnect(prefillQr)
 }
 
 async function main() {
@@ -439,8 +466,20 @@ async function main() {
   if (data.mode === 'rate') {
     pubkey = data.pubkey; name = data.name; since = data.since; mode = 'edit'
   } else {
-    pubkey = id && id.me && id.me.publickey; name = id && id.me && id.me.nickname; mode = 'self'
-    if (!pubkey) { showState('Sin identidad', '<p>No se encontró tu perfil. Crea tu identidad de Dotrino e inténtalo de nuevo.</p>'); return }
+    // Siempre hay identidad (el vault crea un perfil al cargar). Usamos el PERFIL ACTIVO.
+    const cur = id.currentProfile ? await id.currentProfile().catch(() => null) : null
+    pubkey = cur?.pubkey || (id && id.me && id.me.publickey); name = cur?.name || (id && id.me && id.me.nickname); mode = 'self'
+  }
+
+  // SELF (tu perfil): topbar (marca + avatar + moneda) + el componente inline, que YA trae
+  // el switcher de perfiles (acción global del componente shared, igual que en las apps).
+  if (mode === 'self') {
+    injectVaultStyles()
+    vaultShell('Tu perfil', '<div class="vault-wrap"><div id="self-prof"></div></div>', 'Perfiles')
+    const el = makeProfile({ pubkey, name, since, mode, modal: false })
+    el.provider = provider
+    document.getElementById('self-prof')?.appendChild(el)
+    return
   }
 
   const el = makeProfile({ pubkey, name, since, mode, modal: true })
