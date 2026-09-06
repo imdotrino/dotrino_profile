@@ -619,6 +619,12 @@ const SV_I18N = {
     ses_leave: 'Salir',
     ses_copy: 'Sin cámara: copia este texto y pégalo en el otro equipo',
     ses_desc_short: 'Usa tus aplicaciones en un equipo prestado, por un rato y sin dejarlo enlazado.',
+    gr_title: 'Lo que ven tus aplicaciones',
+    gr_desc: 'Saber quién eres no hace falta permitirlo. Tus datos, sí — y aquí se retiran.',
+    gr_none: 'Ninguna aplicación tiene tus datos.',
+    gr_revoke: 'Retirar',
+    gr_revoked: 'Retirado.',
+    gr_name: 'tu nombre', gr_avatar: 'tu foto', gr_email: 'tu correo', gr_links: 'tus enlaces',
   },
   en: {
     h: 'My vault', loading: 'Loading…',
@@ -733,6 +739,12 @@ const SV_I18N = {
     ses_leave: 'Leave',
     ses_copy: 'No camera? Copy this text and paste it on the other device',
     ses_desc_short: 'Use your apps on a borrowed computer, for a while and without leaving it linked.',
+    gr_title: 'What your apps can see',
+    gr_desc: 'Knowing who you are needs no permission. Your data does — and here is where you take it back.',
+    gr_none: 'No app has your data.',
+    gr_revoke: 'Take back',
+    gr_revoked: 'Taken back.',
+    gr_name: 'your name', gr_avatar: 'your picture', gr_email: 'your email', gr_links: 'your links',
   }
 }
 function svt (k, ...a) { const v = SV_I18N[svLang]?.[k]; return String(typeof v === 'function' ? v(...a) : (v ?? k)) }
@@ -775,6 +787,11 @@ function sesFecha (ms) {
 }
 
 const sesScopeTexto = (sc) => sc.map((x) => x === 'vault:store' ? svt('ses_scope_store') : svt('ses_scope_whoami'))
+/** Los alcances del PERMISO (datos del perfil), en palabras. */
+const sesScopeNombres = (sc) => (sc || []).map((x) => ({
+  'profile:name': svt('gr_name'), 'profile:avatar': svt('gr_avatar'),
+  'profile:email': svt('gr_email'), 'profile:social': svt('gr_links'), 'id:whoami': svt('ses_scope_whoami')
+})[x] || x)
 
 /**
  * Un transporte identificado con la identidad de ESTE aparato (la del perfil activo).
@@ -822,11 +839,13 @@ async function sessionsMode () {
         <div style="margin-top:8px"><input id="ses-paste" data-testid="ses-paste" placeholder="${esc(svt('ses_paste'))}" style="width:100%">
         <button class="btn ghost" id="ses-read" data-testid="ses-read" style="margin-top:6px">${esc(svt('ses_read'))}</button></div>
       </div></div>
-    <div class="card"><h3>${esc(svt('ses_given'))}</h3><div id="ses-given"></div></div>`, svt('tag_sessions'))
+    <div class="card"><h3>${esc(svt('ses_given'))}</h3><div id="ses-given"></div></div>
+    <div class="card"><h3>${esc(svt('gr_title'))}</h3><p class="muted">${esc(svt('gr_desc'))}</p><div id="ses-grants"></div></div>`, svt('tag_sessions'))
   wireLangReload()   // el botón de perfil ya lo decora `vaultShell`
 
   pintaMia()
   pintaDadas()
+  pintaPermisos()
 
   document.getElementById('ses-open')?.addEventListener('click', entrar)
   document.getElementById('ses-read')?.addEventListener('click', () => {
@@ -905,6 +924,26 @@ async function sessionsMode () {
           await closeSession({ transport: t, sessionPubkey: d.s, encPub: d.encPub, sid }); t.close?.()
         }
       } catch (_) {}
+    }))
+  }
+
+  /**
+   * QUÉ LE HAS CONCEDIDO A CADA APLICACIÓN. Va aquí, al lado de las sesiones, y no en otra
+   * pantalla: las dos responden a la misma pregunta —quién está usando tu identidad— y
+   * separarlas obligaría al usuario a saber la diferencia entre un permiso y una sesión.
+   */
+  async function pintaPermisos () {
+    const host = document.getElementById('ses-grants'); if (!host) return
+    let lista = []
+    try { const { id } = await connectProvider(); lista = await id.listGrants?.() || [] } catch (_) { }
+    if (!lista.length) { host.innerHTML = `<p class="muted">${esc(svt('gr_none'))}</p>`; return }
+    const nombre = (o) => { try { const h = new URL(o).hostname; const m = /^([a-z0-9-]+)\.dotrino\.com$/.exec(h); return m ? m[1][0].toUpperCase() + m[1].slice(1) : h } catch (_) { return o } }
+    host.innerHTML = lista.map((g) => `<div class="row">
+      <div><strong>${esc(nombre(g.origin))}</strong><br><span class="muted">${esc(g.origin.replace(/^https?:\/\//, ''))} · ${esc(sesScopeNombres(g.scopes).join(', '))}</span></div>
+      <button class="btn ghost gr-revoke" data-origin="${esc(g.origin)}">${esc(svt('gr_revoke'))}</button></div>`).join('')
+    host.querySelectorAll('.gr-revoke').forEach((b) => b.addEventListener('click', async () => {
+      try { const { id } = await connectProvider(); await id.revokeGrant(b.getAttribute('data-origin')) } catch (_) {}
+      pintaPermisos(); alerta('ses-grants', svt('gr_revoked'))
     }))
   }
 
