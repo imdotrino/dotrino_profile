@@ -13,7 +13,7 @@
   "dependencies": {
     "@dotrino/identity": "0.62.0",
     "@dotrino/profile": "0.16.0",
-    "@dotrino/reputation": "0.9.0",
+    "@dotrino/reputation": "0.11.0",
     "@dotrino/topbar": "0.9.0",
     "jsqr": "1.4.0",
     "qrcode-generator": "1.4.4"
