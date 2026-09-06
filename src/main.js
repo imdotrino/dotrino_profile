@@ -20,6 +20,11 @@ import '@dotrino/profile' // registra el custom element <dotrino-profile>
 import '@dotrino/topbar'  // barra superior estándar (marca+volver+idioma+perfil+support)
 import jsQR from 'jsqr' // lector de QR client-side (misma lib que dotrino-qrreader)
 import { qrSvg } from './qr.js' // generador de QR como SVG (emparejamiento self-vault)
+import { makeDeviceKey, signWithDevice } from '@dotrino/identity/capabilities'
+import { keyLabel } from '@dotrino/identity/keyid'
+import { verifySession, cleanSessionScopes } from '@dotrino/identity/session'
+import { openSession, grantSession, denySession, closeSession, parseInvite, sessionCode } from '@dotrino/identity/session-flow'
+import { WebSocketProxyClient, makeEncKeypair } from '@dotrino/proxy-client'
 
 const mount = document.getElementById('app')
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -64,11 +69,11 @@ async function verifySig(pubkeyStr, data, sigB64) {
 // `appBase()` = prefijo bajo el que se sirve la app (`/` en profile.dotrino.com, o
 // `/<repo>/` en el mirror github.io) para que los enlaces funcionen en ambos.
 function appBase () {
-  let p = location.pathname.replace(/index\.html$/i, '').replace(/(myvault|vault)\/?$/i, '')
+  let p = location.pathname.replace(/index\.html$/i, '').replace(/(myvault|vault|sessions)\/?$/i, '')
   if (!p.endsWith('/')) p += '/'
   return p
 }
-function viewUrl (view) { return appBase() + view } // view: '' | 'myvault' | 'vault'
+function viewUrl (view) { return appBase() + view } // view: '' | 'myvault' | 'vault' | 'sessions'
 
 function parseRoute() {
   const h = location.hash.replace(/^#/, '').trim()
@@ -84,6 +89,7 @@ function parseRoute() {
   if (seg === 'myvault' || h === 'myvault') return { mode: 'selfvault', legacy: h === 'myvault' }
   if (seg === 'vault' || h === 'vault') return { mode: 'vault', legacy: h === 'vault' }
   if (seg === 'create') return { mode: 'create' }
+  if (seg === 'sessions' || h === 'sessions') return { mode: 'sessions', legacy: h === 'sessions' }
   // 3) CALIFICAR (#<pubkey> o #p=…) — dato público, se queda como hash.
   if (h) {
     if (h.includes('=')) {
@@ -580,7 +586,39 @@ const SV_I18N = {
     pin_min: 'Mínimo 4 caracteres.',
     pin_mismatch: 'No coinciden.',
     del_msg: '¿Borrar este perfil y todos sus datos? No se puede deshacer.',
-    del_yes: 'Borrar'
+    del_yes: 'Borrar',
+    // --- Entrar en otro navegador (sesiones) ---
+    tag_sessions: 'Entrar',
+    ses_title: 'Entrar en otro navegador',
+    ses_desc: 'Para usar tus aplicaciones en un equipo prestado sin dejarlo enlazado: ese equipo te enseña un código, tú lo lees aquí, y entra por un rato. Cuando vence, se acabó — y si quitas este dispositivo, se van todas las que diste.',
+    ses_open: 'Entrar en ESTE navegador',
+    ses_open_desc: 'Genera un código para que lo leas desde el teléfono donde ya tienes tu cuenta.',
+    ses_grant: 'Dar acceso a otro equipo',
+    ses_grant_desc: 'Lee el código que muestra el otro equipo y déjalo entrar.',
+    ses_waiting: 'Esperando a que alguien lo apruebe…',
+    ses_code: 'Código',
+    ses_code_hint: 'Comprueba que el otro equipo muestra este mismo código antes de aprobar.',
+    ses_in: (n) => `Entraste como <strong>${n}</strong>`,
+    ses_until: (d) => `Hasta ${d}`,
+    ses_paste: 'O pega aquí el código del otro equipo',
+    ses_read: 'Leer',
+    ses_asks: (o) => `<strong>${o}</strong> quiere entrar`,
+    ses_scopes: 'Podrá',
+    ses_scope_whoami: 'saber quién eres',
+    ses_scope_store: 'leer y escribir tus datos',
+    ses_allow: 'Permitir',
+    ses_deny: 'No',
+    ses_given: 'Sesiones que diste',
+    ses_none: 'Ninguna.',
+    ses_close: 'Cerrar',
+    ses_closed: 'Cerrada.',
+    ses_denied: 'No se concedió.',
+    ses_timeout: 'Nadie la aprobó a tiempo.',
+    ses_err: 'No se pudo abrir la sesión.',
+    ses_mine: 'Tu sesión en este navegador',
+    ses_leave: 'Salir',
+    ses_copy: 'Sin cámara: copia este texto y pégalo en el otro equipo',
+    ses_desc_short: 'Usa tus aplicaciones en un equipo prestado, por un rato y sin dejarlo enlazado.',
   },
   en: {
     h: 'My vault', loading: 'Loading…',
@@ -662,7 +700,39 @@ const SV_I18N = {
     pin_min: 'Minimum 4 characters.',
     pin_mismatch: 'They do not match.',
     del_msg: 'Delete this profile and all its data? This cannot be undone.',
-    del_yes: 'Delete'
+    del_yes: 'Delete',
+    // --- Signing in on another browser (sessions) ---
+    tag_sessions: 'Sign in',
+    ses_title: 'Sign in on another browser',
+    ses_desc: 'To use your apps on a borrowed computer without leaving it linked: that computer shows you a code, you read it here, and it gets in for a while. When it expires, that is that — and if you remove this device, every session you gave goes with it.',
+    ses_open: 'Sign in on THIS browser',
+    ses_open_desc: 'Creates a code for you to read from the phone where you already have your account.',
+    ses_grant: 'Let another computer in',
+    ses_grant_desc: 'Read the code the other computer is showing and let it in.',
+    ses_waiting: 'Waiting for someone to approve it…',
+    ses_code: 'Code',
+    ses_code_hint: 'Check that the other computer shows this same code before approving.',
+    ses_in: (n) => `You are in as <strong>${n}</strong>`,
+    ses_until: (d) => `Until ${d}`,
+    ses_paste: 'Or paste the other computer\'s code here',
+    ses_read: 'Read',
+    ses_asks: (o) => `<strong>${o}</strong> wants to get in`,
+    ses_scopes: 'It will be able to',
+    ses_scope_whoami: 'know who you are',
+    ses_scope_store: 'read and write your data',
+    ses_allow: 'Allow',
+    ses_deny: 'No',
+    ses_given: 'Sessions you gave',
+    ses_none: 'None.',
+    ses_close: 'Close',
+    ses_closed: 'Closed.',
+    ses_denied: 'Not granted.',
+    ses_timeout: 'Nobody approved it in time.',
+    ses_err: 'Could not open the session.',
+    ses_mine: 'Your session on this browser',
+    ses_leave: 'Leave',
+    ses_copy: 'No camera? Copy this text and paste it on the other device',
+    ses_desc_short: 'Use your apps on a borrowed computer, for a while and without leaving it linked.',
   }
 }
 function svt (k, ...a) { const v = SV_I18N[svLang]?.[k]; return String(typeof v === 'function' ? v(...a) : (v ?? k)) }
@@ -676,6 +746,248 @@ function wireLangReload () {
     document.documentElement.lang = l
     window.location.reload()
   })
+}
+
+/**
+ * ENTRAR EN OTRO NAVEGADOR — las sesiones (`@dotrino/identity/session`).
+ *
+ * Enlazar un aparato y entrar en uno no son lo mismo: enlazar mete una llave en el acta,
+ * y para eso hace falta la selladora y el perfil abierto. Esta pantalla es la otra puerta.
+ *
+ * Tiene las DOS puntas porque el mismo aparato hace las dos cosas en momentos distintos:
+ * hoy quieres entrar desde un equipo prestado, mañana eres tú quien deja entrar a otro.
+ */
+
+const SES_LS = 'dotrino.session.mine'      // el papel de ESTA sesión, si entramos aquí
+const SES_GIVEN = 'dotrino.session.given'  // las que ha concedido este aparato
+
+const sesLoad = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null') } catch (_) { return null } }
+const sesSave = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch (_) {} }
+
+/**
+ * Aquí SÍ va `localStorage` y no el store del ecosistema, y no es un descuido: el
+ * navegador que entra todavía NO tiene identidad —eso es lo que viene a conseguir—, así
+ * que no hay store al que escribir. Y lo que se guarda vence solo.
+ */
+function sesFecha (ms) {
+  try { return new Date(ms).toLocaleString(svLang === 'en' ? 'en-US' : 'es-ES', { dateStyle: 'short', timeStyle: 'short' }) }
+  catch (_) { return String(ms) }
+}
+
+const sesScopeTexto = (sc) => sc.map((x) => x === 'vault:store' ? svt('ses_scope_store') : svt('ses_scope_whoami'))
+
+/**
+ * Un transporte identificado con la identidad de ESTE aparato (la del perfil activo).
+ *
+ * Es lo que usa el lado que RESPALDA. Se identificaba con la llave de sesión local, y eso
+ * está mal por partida doble: se anuncia como si fuera una sesión, y —cuando las dos
+ * puntas están en el mismo navegador— acaba compartiendo pubkey con quien espera, así que
+ * el papel nunca llegaba a su destino.
+ */
+async function sesTransporteIdentidad (id) {
+  const client = new WebSocketProxyClient({ url: 'wss://proxy.dotrino.com', autoReconnect: true })
+  await client.connect()
+  const pub = (await id.currentProfile?.().catch(() => null))?.pubkey || id.me.publickey
+  await client.identifyAs({ publickey: pub, sign: (d) => id.signData(d) })
+  return client
+}
+
+/**
+ * Un transporte identificado bajo la llave que se le pase (el lado que ENTRA).
+ *
+ * `encPrivateKey` NO es opcional en la práctica: la respuesta viene SELLADA (el proxio no
+ * cifra, CONVENCIONES §4.1) y sin la privada aquí el cliente del pilar no puede abrir el
+ * sobre y lo descarta en silencio — la pantalla se queda esperando algo que ya llegó.
+ */
+async function sesTransporte (llave, encPrivateKey = null) {
+  const client = new WebSocketProxyClient({ url: 'wss://proxy.dotrino.com', autoReconnect: true, myEncPrivateKey: encPrivateKey })
+  await client.connect()
+  await client.identifyAs({
+    publickey: llave.publickey,
+    sign: (d) => signWithDevice({ privateJwk: llave.privateJwk, data: d })
+  })
+  return client
+}
+
+async function sessionsMode () {
+  injectVaultStyles()
+  // `vaultShell` PINTA (no devuelve): asignar su resultado dejaba «undefined» en la página.
+  vaultShell(svt('ses_title'), `<p class="muted">${esc(svt('ses_desc'))}</p>
+    <div id="ses-mine"></div>
+    <div class="card"><h3>${esc(svt('ses_open'))}</h3><p class="muted">${esc(svt('ses_open_desc'))}</p>
+      <div id="ses-open-box"><button class="btn" id="ses-open" data-testid="ses-open">${esc(svt('ses_open'))}</button></div></div>
+    <div class="card"><h3>${esc(svt('ses_grant'))}</h3><p class="muted">${esc(svt('ses_grant_desc'))}</p>
+      <div id="ses-grant-box">
+        <button class="btn ghost" id="ses-scan" data-testid="ses-scan">📷</button>
+        <div style="margin-top:8px"><input id="ses-paste" data-testid="ses-paste" placeholder="${esc(svt('ses_paste'))}" style="width:100%">
+        <button class="btn ghost" id="ses-read" data-testid="ses-read" style="margin-top:6px">${esc(svt('ses_read'))}</button></div>
+      </div></div>
+    <div class="card"><h3>${esc(svt('ses_given'))}</h3><div id="ses-given"></div></div>`, svt('tag_sessions'))
+  wireLangReload()   // el botón de perfil ya lo decora `vaultShell`
+
+  pintaMia()
+  pintaDadas()
+
+  document.getElementById('ses-open')?.addEventListener('click', entrar)
+  document.getElementById('ses-read')?.addEventListener('click', () => {
+    const t = /** @type {HTMLInputElement} */ (document.getElementById('ses-paste'))?.value || ''
+    const inv = parseInvite(extractPayload(t) || t)
+    if (!inv) return alerta('ses-grant-box', svt('v_pasted_invalid'), 'bad')
+    pedirPermiso(inv)
+  })
+  document.getElementById('ses-scan')?.addEventListener('click', async () => {
+    const box = document.getElementById('ses-grant-box')
+    const leido = await scanWithCamera(box)
+    if (!leido) return pintaGrantBox()
+    const inv = parseInvite(extractPayload(leido) || leido)
+    pintaGrantBox()
+    if (!inv) return alerta('ses-grant-box', svt('v_pasted_invalid'), 'bad')
+    pedirPermiso(inv)
+  })
+
+  function alerta (donde, texto, tipo = 'ok') {
+    const host = document.getElementById(donde); if (!host) return
+    const b = document.createElement('div'); b.className = 'banner ' + tipo; b.textContent = texto
+    host.appendChild(b); setTimeout(() => b.remove(), 4000)
+  }
+
+  function pintaGrantBox () {
+    const box = document.getElementById('ses-grant-box'); if (!box) return
+    box.innerHTML = `<button class="btn ghost" id="ses-scan" data-testid="ses-scan">📷</button>
+      <div style="margin-top:8px"><input id="ses-paste" data-testid="ses-paste" placeholder="${esc(svt('ses_paste'))}" style="width:100%">
+      <button class="btn ghost" id="ses-read" data-testid="ses-read" style="margin-top:6px">${esc(svt('ses_read'))}</button></div>`
+    document.getElementById('ses-read')?.addEventListener('click', () => {
+      const t = /** @type {HTMLInputElement} */ (document.getElementById('ses-paste'))?.value || ''
+      const inv = parseInvite(extractPayload(t) || t)
+      if (!inv) return alerta('ses-grant-box', svt('v_pasted_invalid'), 'bad')
+      pedirPermiso(inv)
+    })
+    document.getElementById('ses-scan')?.addEventListener('click', async () => {
+      const leido = await scanWithCamera(document.getElementById('ses-grant-box'))
+      pintaGrantBox()
+      if (leido) { const inv = parseInvite(extractPayload(leido) || leido); if (inv) pedirPermiso(inv) }
+    })
+  }
+
+  /** La sesión de ESTE navegador, si entramos aquí. */
+  function pintaMia () {
+    const host = document.getElementById('ses-mine'); if (!host) return
+    const mia = sesLoad(SES_LS)
+    if (!mia?.paper || mia.paper.exp <= Date.now()) { host.innerHTML = ''; return }
+    host.innerHTML = `<div class="banner ok">${svt('ses_in', esc(mia.name || mia.paper.sid.slice(0, 8)))} · ${esc(svt('ses_until', sesFecha(mia.paper.exp)))}
+      <button class="btn ghost" id="ses-leave" data-testid="ses-leave" style="margin-left:8px">${esc(svt('ses_leave'))}</button></div>`
+    document.getElementById('ses-leave')?.addEventListener('click', () => {
+      try { localStorage.removeItem(SES_LS) } catch (_) {}
+      pintaMia()
+    })
+  }
+
+  /** Las que este aparato concedió: se ven y se cierran. */
+  function pintaDadas () {
+    const host = document.getElementById('ses-given'); if (!host) return
+    const dadas = (sesLoad(SES_GIVEN) || []).filter((x) => x.exp > Date.now())
+    sesSave(SES_GIVEN, dadas)
+    if (!dadas.length) { host.innerHTML = `<p class="muted">${esc(svt('ses_none'))}</p>`; return }
+    host.innerHTML = dadas.map((d) => `<div class="row" data-sid="${esc(d.sid)}">
+      <div><strong>${esc(d.origin)}</strong><br><span class="muted">${esc(svt('ses_until', sesFecha(d.exp)))}</span></div>
+      <button class="btn ghost ses-close" data-sid="${esc(d.sid)}">${esc(svt('ses_close'))}</button></div>`).join('')
+    host.querySelectorAll('.ses-close').forEach((b) => b.addEventListener('click', async () => {
+      const sid = b.getAttribute('data-sid')
+      const d = (sesLoad(SES_GIVEN) || []).find((x) => x.sid === sid)
+      sesSave(SES_GIVEN, (sesLoad(SES_GIVEN) || []).filter((x) => x.sid !== sid))
+      pintaDadas(); alerta('ses-given', svt('ses_closed'))
+      // Avisar es cortesía: lo que la corta de verdad es que el papel vence y nadie lo
+      // renueva. Si el aviso no llega, la sesión muere igual.
+      try {
+        if (d?.s) {
+          const { id } = await connectProvider()
+          const t = await sesTransporteIdentidad(id)
+          await closeSession({ transport: t, sessionPubkey: d.s, encPub: d.encPub, sid }); t.close?.()
+        }
+      } catch (_) {}
+    }))
+  }
+
+  /** Llave de sesión de este navegador (se guarda: reconectar no debe cambiar de identidad). */
+  async function sesLlaveLocal () {
+    let k = sesLoad('dotrino.session.key')
+    if (!k?.privateJwk) { k = await makeDeviceKey({ label: 'sesión' }); sesSave('dotrino.session.key', k) }
+    return k
+  }
+
+  /** LADO DEL QUE ENTRA: enseña el código y espera. */
+  async function entrar () {
+    const box = document.getElementById('ses-open-box'); if (!box) return
+    const llave = await sesLlaveLocal()
+    const enc = await makeEncKeypair()
+    let client
+    try { client = await sesTransporte(llave, enc.privateKey) } catch (_) { return alerta('ses-open-box', svt('ses_err'), 'bad') }
+    try {
+      const s = await openSession({
+        transport: client, sessionPubkey: llave.publickey, encPub: enc.encPub,
+        origin: location.origin, scopes: ['id:whoami', 'vault:store'],
+        onInvite: ({ qr, code }) => {
+          box.innerHTML = `<div class="qr">${qrSvg(qr)}</div>
+            <p><strong>${esc(svt('ses_code'))}: ${esc(code)}</strong></p>
+            <p class="muted">${esc(svt('ses_code_hint'))}</p>
+            <p class="muted" data-testid="ses-waiting">${esc(svt('ses_waiting'))}</p>
+            <details><summary class="muted">${esc(svt('ses_copy'))}</summary>
+              <textarea readonly data-testid="ses-invite" style="width:100%;height:72px">${esc(qr)}</textarea></details>`
+        }
+      })
+      // La HUELLA legible (AB12-CD34), no el JWK crudo: al usuario hay que enseñarle en qué
+      // cuenta entró, no una llave.
+      const huella = await keyLabel(s.profileId).catch(() => null)
+      sesSave(SES_LS, { paper: s.paper, chain: s.chain, name: huella, privateJwk: llave.privateJwk })
+      box.innerHTML = `<button class="btn" id="ses-open" data-testid="ses-open">${esc(svt('ses_open'))}</button>`
+      document.getElementById('ses-open')?.addEventListener('click', entrar)
+      pintaMia()
+    } catch (e) {
+      const cual = e?.code === 'session-denied' ? 'ses_denied' : e?.code === 'session-timeout' ? 'ses_timeout' : 'ses_err'
+      box.innerHTML = `<button class="btn" id="ses-open" data-testid="ses-open">${esc(svt('ses_open'))}</button>`
+      document.getElementById('ses-open')?.addEventListener('click', entrar)
+      alerta('ses-open-box', svt(cual), 'bad')
+    } finally { try { client.close?.() } catch (_) {} }
+  }
+
+  /** LADO DEL QUE RESPALDA: qué pide, y decidir. Nada se concede sin que el dueño pulse. */
+  function pedirPermiso (inv) {
+    const box = document.getElementById('ses-grant-box'); if (!box) return
+    const scopes = cleanSessionScopes(inv.scopes)
+    box.innerHTML = `<div class="banner">${svt('ses_asks', esc(inv.origin))}
+      <p class="muted">${esc(svt('ses_scopes'))}: ${esc(sesScopeTexto(scopes).join(', '))}</p>
+      <p><strong>${esc(svt('ses_code'))}: ${esc(sessionCode(inv.sid))}</strong></p>
+      <p class="muted">${esc(svt('ses_code_hint'))}</p>
+      <button class="btn" id="ses-allow" data-testid="ses-allow">${esc(svt('ses_allow'))}</button>
+      <button class="btn ghost" id="ses-deny" data-testid="ses-deny">${esc(svt('ses_deny'))}</button></div>`
+    document.getElementById('ses-deny')?.addEventListener('click', async () => {
+      pintaGrantBox()
+      try {
+        const { id } = await connectProvider()
+        const t = await sesTransporteIdentidad(id); await denySession({ transport: t, invite: inv }); t.close?.()
+      } catch (_) {}
+    })
+    document.getElementById('ses-allow')?.addEventListener('click', async () => {
+      let id
+      try { ({ id } = await connectProvider()) } catch { return alerta('ses-grant-box', svt('err_noid_body'), 'bad') }
+      try {
+        const chain = await id.sealerChain()
+        const by = (await id.currentProfile?.().catch(() => null))?.pubkey || id.me.publickey
+        const t = await sesTransporteIdentidad(id)
+        const paper = await grantSession({
+          transport: t, invite: inv, by, chain, scopes,
+          sign: (body) => id.signData(body)
+        })
+        t.close?.()
+        const dadas = sesLoad(SES_GIVEN) || []
+        dadas.push({ sid: paper.sid, s: paper.s, encPub: inv.encPub, origin: paper.origin, exp: paper.exp })
+        sesSave(SES_GIVEN, dadas)
+        pintaGrantBox(); pintaDadas()
+      } catch (e) {
+        pintaGrantBox(); alerta('ses-grant-box', svt('ses_err'), 'bad')
+      }
+    })
+  }
 }
 
 async function selfVaultMode () {
@@ -960,6 +1272,7 @@ async function main() {
 
   if (data.mode === 'vault' || pendingPair) return vaultMode(data.qr)
   if (data.mode === 'selfvault') return selfVaultMode()
+  if (data.mode === 'sessions') return sessionsMode()
 
   // ── VALIDAR: firma del contenido + reputación del remitente, en un paso ──
   if (data.mode === 'validate') {
@@ -1005,7 +1318,7 @@ async function main() {
   // PIN, exclusiva de ESTA página (no aparece en el popup de las otras apps).
   if (mode === 'self') {
     injectVaultStyles()
-    vaultShell(svt('prof_title'), `<div class="vault-wrap"><div id="self-prof"></div><div id="pin-section"></div><div class="sv-link-row"><p class="status">${esc(svt('self_link_desc'))}</p><a href="${viewUrl('myvault')}" data-testid="goto-myvault">${esc(svt('self_link'))}</a></div></div>`, svt('tag_profiles'))
+    vaultShell(svt('prof_title'), `<div class="vault-wrap"><div id="self-prof"></div><div id="pin-section"></div><div class="sv-link-row"><p class="status">${esc(svt('self_link_desc'))}</p><a href="${viewUrl('myvault')}" data-testid="goto-myvault">${esc(svt('self_link'))}</a></div><div class="sv-link-row"><p class="status">${esc(svt('ses_desc_short'))}</p><a href="${viewUrl('sessions')}" data-testid="goto-sessions">${esc(svt('ses_title'))}</a></div></div>`, svt('tag_profiles'))
     wireLangReload()
     const el = makeProfile({ pubkey, name, since, mode, modal: false, manage: true })
     el.provider = provider
