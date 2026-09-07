@@ -625,6 +625,8 @@ const SV_I18N = {
     gr_revoke: 'Retirar',
     gr_revoked: 'Retirado.',
     gr_name: 'tu nombre', gr_avatar: 'tu foto', gr_email: 'tu correo', gr_links: 'tus enlaces',
+    gr_via: 'a través de',
+    gr_last: (d) => `Última vez: ${d}`,
   },
   en: {
     h: 'My vault', loading: 'Loading…',
@@ -745,6 +747,8 @@ const SV_I18N = {
     gr_revoke: 'Take back',
     gr_revoked: 'Taken back.',
     gr_name: 'your name', gr_avatar: 'your picture', gr_email: 'your email', gr_links: 'your links',
+    gr_via: 'through',
+    gr_last: (d) => `Last used: ${d}`,
   }
 }
 function svt (k, ...a) { const v = SV_I18N[svLang]?.[k]; return String(typeof v === 'function' ? v(...a) : (v ?? k)) }
@@ -938,8 +942,11 @@ async function sessionsMode () {
     try { const { id } = await connectProvider(); lista = await id.listGrants?.() || [] } catch (_) { }
     if (!lista.length) { host.innerHTML = `<p class="muted">${esc(svt('gr_none'))}</p>`; return }
     const nombre = (o) => { try { const h = new URL(o).hostname; const m = /^([a-z0-9-]+)\.dotrino\.com$/.exec(h); return m ? m[1][0].toUpperCase() + m[1].slice(1) : h } catch (_) { return o } }
+    // QUIÉN pide arriba y CUÁNDO fue la última vez debajo: sin la fecha, la lista dice qué
+    // concediste pero no si sigue usándose, que es lo que decide si retirarlo.
+    // Lo que el origen dice pedir por otro va SUBORDINADO a él, nunca en su lugar.
     host.innerHTML = lista.map((g) => `<div class="row">
-      <div><strong>${esc(nombre(g.origin))}</strong><br><span class="muted">${esc(g.origin.replace(/^https?:\/\//, ''))} · ${esc(sesScopeNombres(g.scopes).join(', '))}</span></div>
+      <div><strong>${esc(g.onBehalfOf || nombre(g.origin))}</strong><br><span class="muted">${g.onBehalfOf ? esc(svt('gr_via')) + ' ' : ''}${esc(g.origin.replace(/^https?:\/\//, ''))}${g.scopes.length ? ' · ' + esc(sesScopeNombres(g.scopes).join(', ')) : ''}<br>${esc(svt('gr_last', sesFecha(g.lastUsed || g.at)))}</span></div>
       <button class="btn ghost gr-revoke" data-origin="${esc(g.origin)}">${esc(svt('gr_revoke'))}</button></div>`).join('')
     host.querySelectorAll('.gr-revoke').forEach((b) => b.addEventListener('click', async () => {
       try { const { id } = await connectProvider(); await id.revokeGrant(b.getAttribute('data-origin')) } catch (_) {}
